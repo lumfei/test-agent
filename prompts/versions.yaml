@@ -1,0 +1,23 @@
+# Prompt versions manifest
+# Each prompt has an "active" version. Change the version number here to rollback.
+
+prompts:
+  parse_spec:
+    active: v1
+    description: "Parse OpenAPI spec from URL"
+  analyze_api:
+    active: v1
+    description: "Analyze API structure for test strategy"
+  generate_tests:
+    active: v1
+    description: "Generate test cases from API schema"
+  validate_report:
+    active: v1
+    description: "Validate test results and generate report"
+
+# Version history (newest first)
+history:
+  v1:
+    date: "2026-07-01"
+    author: "api-test-agent"
+    notes: "Initial versions"

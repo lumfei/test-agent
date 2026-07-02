@@ -1,0 +1,76 @@
+{
+  "metadata": {
+    "name": "API Test Agent Golden Dataset",
+    "version": "1.0",
+    "description": "Golden test cases for evaluating API test agent quality",
+    "created": "2026-07-01"
+  },
+  "cases": [
+    {
+      "id": "golden-001",
+      "name": "Mock Buggy API — bug detection",
+      "description": "Test against mock API with 5 known bugs. Agent should detect at least 3 of them.",
+      "spec_url": "http://localhost:8001/openapi.json",
+      "spec_type": "openapi",
+      "expected_bugs": [
+        "GET /api/users?limit=0 returns 500",
+        "POST /api/users accepts empty body",
+        "GET /api/users/999 returns HTML instead of JSON",
+        "DELETE /api/users/{id} has no auth check",
+        "POST /api/users does not escape SQL injection"
+      ],
+      "min_pass_rate": 5.0,
+      "max_pass_rate": 40.0,
+      "expected_endpoints_min": 4,
+      "tags": ["bug-detection", "mock-api"]
+    },
+    {
+      "id": "golden-002",
+      "name": "Healthy API — should pass cleanly",
+      "description": "Test against a well-implemented API. Agent should achieve high pass rate.",
+      "spec_url": "http://localhost:8000/openapi.json",
+      "spec_type": "openapi",
+      "expected_bugs": [],
+      "min_pass_rate": 75.0,
+      "max_pass_rate": 100.0,
+      "expected_endpoints_min": 10,
+      "tags": ["healthy-api", "regression"]
+    },
+    {
+      "id": "golden-003",
+      "name": "Petstore API — standard OpenAPI",
+      "description": "Test against Swagger Petstore (public). Standard OpenAPI 3.0 spec.",
+      "spec_url": "https://petstore3.swagger.io/api/v3/openapi.json",
+      "spec_type": "openapi",
+      "expected_bugs": [],
+      "min_pass_rate": 60.0,
+      "max_pass_rate": 100.0,
+      "expected_endpoints_min": 15,
+      "tags": ["public-api", "openapi-standard"]
+    },
+    {
+      "id": "golden-004",
+      "name": "Spec parsing — $ref resolution",
+      "description": "Verify agent correctly resolves $ref references in schemas.",
+      "spec_url": "http://localhost:8001/openapi.json",
+      "spec_type": "openapi",
+      "expected_bugs": [],
+      "min_pass_rate": 5.0,
+      "max_pass_rate": 100.0,
+      "expected_endpoints_min": 4,
+      "tags": ["ref-resolution", "schema-parsing"]
+    },
+    {
+      "id": "golden-005",
+      "name": "Security testing — injection detection",
+      "description": "Verify agent generates and executes security test cases (SQLi, XSS).",
+      "spec_url": "http://localhost:8001/openapi.json",
+      "spec_type": "openapi",
+      "expected_bugs": ["SQL injection not escaped"],
+      "min_pass_rate": 5.0,
+      "max_pass_rate": 50.0,
+      "expected_endpoints_min": 4,
+      "tags": ["security", "injection"]
+    }
+  ]
+}

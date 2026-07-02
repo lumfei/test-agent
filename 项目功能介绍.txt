@@ -1,0 +1,599 @@
+╔══════════════════════════════════════════════════════════════════════════╗
+║            🧪 API Test Agent：基于 LangGraph 的 REST API 自动化测试 Agent     ║
+║                    项目功能介绍 & 技术实现说明                                ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  📌 一、项目概述
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  本项目是一个基于 LangGraph + DeepSeek 的 REST API 自动化测试 Agent。
+  从 OpenAPI Spec URL 出发，自动完成"文档解析 → 测试用例生成 → 并发执行
+  → Schema 验证 → LLM 语义分析 → 测试报告"的全流程，全程零人工介入。
+
+  核心思路：将 API 测试转化为 LangGraph 状态机工作流，在每个节点引入 LLM
+  进行语义理解（API 结构分析、测试用例补充、失败归因），而非单纯依赖模板
+  生成。配合六层安全护栏和 LLM-as-Judge，自动区分真实 Bug vs 测试设计问题。
+
+  适用场景：
+    • 后端开发者的 API 自动化回归测试
+    • QA 团队的 OpenAPI 合规性验证
+    • 安全测试（SQL 注入 / XSS / 越权访问自动检测）
+    • CI/CD 流水线中的 API 质量门禁
+    • 微服务架构的批量接口健康巡检
+    • 面试展示：Agentic 自动化测试的技术参考实现
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  🎯 二、核心功能清单
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. 🔍 智能文档解析
+     ├─ 支持 OpenAPI 3.x / Swagger 2.0 完整规范
+     ├─ JSON / YAML 双格式兼容
+     ├─ 自动抓取 Swagger UI / Redoc 页面并提取 Spec
+     ├─ $ref / anyOf / allOf 完整展开解析
+     ├─ 路径参数 / 查询参数 / 请求体 / 响应 Schema 全量提取
+     └─ 认证方式自动识别（bearer / api_key / basic / oauth2）
+
+  2. 🧬 四维测试用例自动生成
+     ├─ 正常用例（Normal）：合法参数 + 期望 2xx
+     ├─ 边界用例（Boundary）：空 body / 超长输入 / Unicode / 零值 / 路径参数边界
+     ├─ 异常用例（Error）：错误 HTTP 方法 / 错误 Content-Type / 畸形 JSON / 缺少必填参数
+     ├─ 安全用例（Security）：SQL 注入（5 种 Payload）/ XSS（4 种 Payload）/
+     │                      无认证访问 / 无效 Token
+     └─ GET 请求智能识别：不发送 body，边界/异常数据自动走 query 参数
+
+  3. 🧠 LLM 增强的测试策略
+     ├─ LLM 分析 API 结构：识别核心端点 vs 辅助端点
+     ├─ 风险评估 + 优先级排序（高/中/低）
+     ├─ 对高优先级端点 LLM 补充额外测试用例（上下文感知）
+     └─ deepseek-chat 模型（OpenAI 兼容接口）
+
+  4. ⚡ 并发执行 + HITL 审批
+     ├─ 安全用例（GET/HEAD）5 并发异步执行
+     ├─ 危险操作（PUT/DELETE/PATCH）HITL 人工确认后串行执行
+     ├─ 按优先级排序：high → medium → low
+     ├─ 每用例最多重试 3 次
+     └─ 单次最多执行 80 个用例（可配置）
+
+  5. 📊 Schema 验证 + 多维检查
+     ├─ HTTP 状态码匹配（支持多期望值列表）
+     ├─ JSON Schema 响应体验证（jsonschema 库）
+     ├─ 响应时间阈值检查（25s，LLM API 友好）
+     ├─ 路径参数自动替换为测试值
+     └─ 格式感知数据生成（date/email/uuid/uri/pattern 约束）
+
+  6. 🧠 LLM-as-Judge 语义验证
+     ├─ 对失败用例进行 LLM 语义分析
+     ├─ 5 维评分：准确性 / 完整性 / 相关性 / 安全性 / 有用性
+     ├─ 自动区分：
+     │   🔴 真实 Bug（API 代码缺陷）
+     │   🟡 测试设计问题（用例期望值不合理）
+     │   ⚪ 环境问题（网络/超时/配置）
+     └─ 行为漂移检测（基线对比 + 维度漂移分析）
+
+  7. 📝 多格式报告 + 可视化
+     ├─ Markdown 报告（适合 Git 存档 / PR 评论）
+     ├─ HTML 报告（适合浏览器查看 / 分享）
+     ├─ JSON 报告（适合程序消费 / CI 集成）
+     ├─ Streamlit Dashboard：交互式结果浏览 + 图表
+     └─ 报告含：总览统计 / 分类通过率 / 失败用例详情 / LLM 分析结论
+
+  8. 💾 双重持久化 + 断点续跑
+     ├─ SQLite：测试用例 / 执行记录 / 运行历史（aiosqlite 异步）
+     ├─ Qdrant：API Spec 向量嵌入（1024 维，便于相似 API 检索）
+     ├─ LangGraph Checkpoint：状态快照 + time-travel 调试
+     ├─ 支持暂停后从断点恢复执行
+     └─ 历史记录 Dashboard 可回溯
+
+  9. 🌊 SSE 实时流式推送
+     ├─ /api/test/stream/{run_id} 端点
+     ├─ 事件类型：progress / case_result / completed / error
+     ├─ 15s 心跳保活（防止代理超时断连）
+     └─ 前端 EventSource 直接消费
+
+  10. 🛡️ 六层安全防御（OWASP ASI 对齐）
+      ├─ 第 1 层：输入过滤（Spec URL 白名单 / 长度限制）
+      ├─ 第 2 层：指令隔离（Prompt 模板外置 YAML + 参数化注入）
+      ├─ 第 3 层：工具校验（生成的数据不包含可执行代码）
+      ├─ 第 4 层：沙箱约束（HTTP 请求目标域名白名单）
+      ├─ 第 5 层：HITL 审批（危险操作需人工确认）
+      └─ 第 6 层：审计追踪（全链路 LangFuse Tracing）
+
+  11. 📊 可观测性
+      ├─ LangFuse 全链路 Tracing（5 个节点的输入/输出/耗时）
+      ├─ CostTracker 多模型 Token 用量 + 费用统计（USD + CNY）
+      ├─ 成本优化建议（自动分析高消耗端点）
+      ├─ 推理 Token 统计（reasoning trace）
+      └─ 惰性连接（LangFuse 不可用时不影响核心功能）
+
+  12. 🧪 完整测试体系
+      ├─ 32 项单元测试（SpecParser / TestDataGenerator / SchemaValidator / Golden Dataset）
+      ├─ 146 项综合测试（16 大类：配置 / Qdrant / SQLite / LLM / 安全 / HTTP /
+      │                    检查点 / 追踪 / 评测 / 报告 / Prompt / 解析器 /
+      │                    数据生成 / 验证器 / 看门狗 / 并发）
+      ├─ Golden Dataset 回归测试（3+ 已知 Bug 场景）
+      ├─ Mock API E2E 测试（5 个故意插入的 Bug）
+      └─ 一键 setup_and_test.py 初始化 + 验证
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  🏗 三、系统架构
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Agent 执行流程（LangGraph 5 节点状态图）：
+
+  用户输入 Spec URL
+       │
+       ▼
+  [1. Parse Spec]      ← Web 抓取 + OpenAPI 解析 + $ref 展开
+       │                 + 认证检测 + Schema 提取
+       ▼
+  [2. Analyze API]     ← LLM 分析结构 + 端点优先级排序 + 风险评估
+       │
+       ▼
+  [3. Generate Tests]  ← 四维模板生成（正常/边界/异常/安全）
+       │                 + LLM 补充高优先级端点的额外汇总用例
+       │                 + 格式感知数据（date/email/uuid/pattern）
+       ▼
+  [4. Execute Tests]   ← 安全用例 5 并发 / 危险操作 HITL 审批串行
+       │                 + 状态码检查 + JSON Schema 验证 + 响应时间
+       ▼
+  [5. Validate & Report] ← LLM-as-Judge 语义分析失败用例
+       │                   + 生成 MD/HTML/JSON 报告
+       ▼
+  📊 测试报告 + Dashboard
+
+  状态管理：
+    • AgentState（TypedDict，20+ 字段）在工作流节点间传递
+    • SqliteSaver Checkpoint 持久化（支持 time-travel 调试）
+    • 每次 invoke 指定 thread_id，支持多会话并发隔离
+
+  三服务架构：
+    • FastAPI：REST API + SSE 流式（生产级后端）
+    • Streamlit：交互式 Dashboard（图表 + 结果浏览）
+    • Qdrant：向量数据库（Docker 独立容器，端口隔离）
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  🔧 四、所用技术与对应功能（小白友好版）
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  每个技术的类型标签 + 功能说明。面试被问"XX 是什么"时直接念类型。
+
+  ┌──────────────────────┬───────────────────────────────────────┐
+  │ 技术（类型）           │ 用来干什么                              │
+  ├──────────────────────┼───────────────────────────────────────┤
+  │                      │                                       │
+  │ 🗄️ 存储相关            │                                       │
+  │                      │                                       │
+  │ SQLite               │ 关系型数据库。用表格存数据，是一个文件    │
+  │                      │ 不是软件，Python 自带无需安装。           │
+  │                      │ → 存测试运行记录、用例、执行结果           │
+  │                      │ → Dashboard 历史记录全靠它               │
+  │                      │                                       │
+  │ aiosqlite            │ SQLite 的异步驱动（数据库驱动程序）。     │
+  │                      │ → 让数据库操作不卡住其他请求              │
+  │                      │ → 所有数据库调用前面都有 await            │
+  │                      │                                       │
+  │ Qdrant               │ 向量数据库。不像 SQLite 用关键词搜，      │
+  │                      │ 而是搜"哪个东西和这个最像"。              │
+  │                      │ → 未来用于"这个 API 和之前测过的哪个 API  │
+  │                      │   结构相似，复用历史用例"（当前未接入）    │
+  │                      │                                       │
+  ├──────────────────────┼───────────────────────────────────────┤
+  │                      │                                       │
+  │ 🤖 AI / Agent 相关     │                                       │
+  │                      │                                       │
+  │ LangGraph 1.0+       │ AI 工作流编排框架。任务拆成多个步骤，   │
+  │                      │ 按顺序执行，出错自动跳转。               │
+  │                      │ → 5 节点状态图（解析→分析→生成→执行→报告）│
+  │                      │ → Checkpoint 支持暂停恢复               │
+  │                      │                                       │
+  │ LangChain 0.3+       │ AI 应用开发框架。提供统一的 LLM 调用接口  │
+  │                      │ 和消息格式。LangGraph 的底层依赖。        │
+  │                      │                                       │
+  │ DeepSeek V4 Flash    │ 大语言模型（LLM，AI 大脑）。             │
+  │                      │ 能读文档、理解语义、生成文字。            │
+  │                      │ → 分析 API 结构 + 生成测试用例            │
+  │                      │ → LLM-as-Judge 判断失败原因              │
+  │                      │ → ¥0.001/1K tokens，极便宜              │
+  │                      │                                       │
+  │ LiteLLM 1.40+        │ 多模型统一调用库。同一套代码可以调        │
+  │                      │ DeepSeek、OpenAI、其他 100+ 模型。       │
+  │                      │                                       │
+  ├──────────────────────┼───────────────────────────────────────┤
+  │                      │                                       │
+  │ 🌐 Web 后端相关         │                                       │
+  │                      │                                       │
+  │ FastAPI 0.115+       │ Python Web 框架。搭建 API 接口，        │
+  │                      │ 接收 HTTP 请求返回 JSON 数据。           │
+  │                      │ → 7 个 REST 端点 + SSE 流式推送          │
+  │                      │                                       │
+  │ Pydantic v2          │ 数据校验库。检查传进来的参数类型和格式    │
+  │                      │ 对不对，不对的直接拒绝。                  │
+  │                      │                                       │
+  │ uvicorn              │ ASGI Web 服务器。让 FastAPI 跑起来       │
+  │                      │ 能接收网络请求（FastAPI 的发动机）。      │
+  │                      │                                       │
+  │ HTTPx 0.27+          │ HTTP 客户端库。向被测 API 发            │
+  │                      │ GET/POST/PUT/DELETE 请求并收响应。       │
+  │                      │ → 5 并发异步执行                        │
+  │                      │ → 超时控制 + 响应大小限制                 │
+  │                      │                                       │
+  ├──────────────────────┼───────────────────────────────────────┤
+  │                      │                                       │
+  │ 🖥️ 前端 / Dashboard     │                                       │
+  │                      │                                       │
+  │ Streamlit 1.30+      │ Python 数据展示框架。不用写 HTML/CSS，   │
+  │                      │ Python 代码直接画出网页界面。            │
+  │                      │ → 测试结果图表 + 用例明细表              │
+  │                      │ → 历史记录浏览 + 报告下载                 │
+  │                      │                                       │
+  │ Plotly 5.20+         │ JavaScript 图表库。把数字变柱状图、      │
+  │                      │ 饼图，一眼看出各类用例通过率。            │
+  │                      │                                       │
+  ├──────────────────────┼───────────────────────────────────────┤
+  │                      │                                       │
+  │ 📊 可观测性（监控追踪）  │                                       │
+  │                      │                                       │
+  │ LangFuse 2.40+       │ LLM 应用追踪平台。记录每次调 AI 的       │
+  │                      │ 输入/输出/耗时/花费。                   │
+  │                      │ → 5 个节点全链路 Trace                  │
+  │                      │ → 惰性连接：不可用也不影响核心功能        │
+  │                      │                                       │
+  │ OpenTelemetry        │ 可观测性标准协议。生成标准格式的追踪数据， │
+  │                      │ 对接 LangFuse 等平台。                  │
+  │                      │                                       │
+  ├──────────────────────┼───────────────────────────────────────┤
+  │                      │                                       │
+  │ 🧪 评测相关            │                                       │
+  │                      │                                       │
+  │ DeepEval 1.0+        │ LLM 输出评测框架。5 维给 AI 打分：       │
+  │                      │ 准确性/完整性/相关性/安全性/有用性。     │
+  │                      │ → LLM-as-Judge 自动判断失败归因          │
+  │                      │ → 行为漂移检测（版本对比）                │
+  │                      │                                       │
+  │ RAGAS 0.2+           │ RAG 系统评测框架。备用，评估检索质量。    │
+  │                      │                                       │
+  ├──────────────────────┼───────────────────────────────────────┤
+  │                      │                                       │
+  │ 🛡️ 安全                │                                       │
+  │                      │                                       │
+  │ 六层纵深防御（自研）    │ 安全防护机制。6 道关卡：               │
+  │                      │ 输入过滤→指令隔离→工具校验→沙箱约束       │
+  │                      │ →HITL 人工审批→审计追踪                  │
+  │                      │                                       │
+  ├──────────────────────┼───────────────────────────────────────┤
+  │                      │                                       │
+  │ 🐳 部署相关            │                                       │
+  │                      │                                       │
+  │ Docker               │ 容器化平台。把代码和环境打包成镜像，      │
+  │                      │ 到任何机器上都能跑。集装箱思维。          │
+  │                      │ → 多阶段构建（builder → runtime）        │
+  │                      │ → 非 root 用户运行                      │
+  │                      │                                       │
+  │ Docker Compose       │ 多容器编排工具。一条命令同时启动          │
+  │                      │ Qdrant + FastAPI + Streamlit 三个服务。 │
+  │                      │ → HEALTHCHECK 健康检查                  │
+  │                      │ → depends_on 服务依赖编排               │
+  │                      │                                       │
+  ├──────────────────────┼───────────────────────────────────────┤
+  │                      │                                       │
+  │ 🔧 基础工具库           │                                       │
+  │                      │                                       │
+  │ PyYAML 6.0+          │ YAML 格式解析库。读外部的 Prompt 配置    │
+  │                      │ 文件（parse/analyze/generate/validate）。│
+  │                      │                                       │
+  │ jsonschema 4.20+     │ JSON Schema 校验库。验证 API 返回的     │
+  │                      │ JSON 结构是否和文档定义一致。             │
+  │                      │                                       │
+  │ openapi-spec-        │ OpenAPI 规范解析库。解析 OpenAPI 3.x /  │
+  │ validator + prance   │ Swagger 2.0 文档，展开 $ref 引用。      │
+  │                      │                                       │
+  │ BeautifulSoup + lxml │ HTML 网页解析库。从 Swagger UI 页面     │
+  │                      │ 里提取 OpenAPI Spec 内容。              │
+  │                      │                                       │
+  │ tenacity 8.0+        │ 失败重试库。网络请求失败自动再试，       │
+  │                      │ 最多试 3 次。                          │
+  │                      │                                       │
+  │ python-dotenv        │ 环境变量加载库。从 .env 文件读密码等     │
+  │                      │ 敏感配置，不写在代码里。                 │
+  │                      │                                       │
+  │ Python 3.12+         │ 编程语言。FastAPI/LangGraph/Streamlit   │
+  │                      │ 等所有东西都跑在它上面。                 │
+  │                      │                                       │
+  └──────────────────────┴───────────────────────────────────────┘
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  📂 五、项目代码结构
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  api-test-agent/
+  ├── src/
+  │   ├── main.py                       🔥 FastAPI 入口
+  │   │                                    • 7 个 REST 端点
+  │   │                                    • SSE 流式推送
+  │   │                                    • 后台任务管理
+  │   │
+  │   ├── config.py                     🔥 全局配置中心
+  │   │                                    • 环境变量读取（.env）
+  │   │                                    • DeepSeek / Qdrant / SQLite 参数
+  │   │                                    • Agent 执行超参数
+  │   │
+  │   ├── event_bus.py                  进程内 SSE 事件总线
+  │   │                                    • asyncio.Queue Pub/Sub
+  │   │                                    • 按 run_id 隔离
+  │   │                                    • 心跳保活机制
+  │   │
+  │   ├── agent/
+  │   │   ├── state.py                  AgentState TypedDict 定义
+  │   │   │                                • 20+ 字段类型安全
+  │   │   │
+  │   │   ├── graph.py                  🔥 LangGraph StateGraph 编排
+  │   │   │                                • 5 节点 + 条件边
+  │   │   │                                • run_agent() 入口函数
+  │   │   │
+  │   │   └── nodes/
+  │   │       ├── parse_spec.py         ① 抓取 + 解析 OpenAPI
+  │   │       │                            • Web 文档抓取
+  │   │       │                            • OpenAPI 3.x / Swagger 2.0
+  │   │       │                            • $ref / anyOf 展开
+  │   │       │
+  │   │       ├── analyze_api.py        ② LLM 分析 API 结构
+  │   │       │                            • 端点优先级排序
+  │   │       │                            • 风险评估
+  │   │       │                            • 认证检测
+  │   │       │
+  │   │       ├── generate_tests.py     ③ 测试用例生成
+  │   │       │                            • 模板生成（四维覆盖）
+  │   │       │                            • LLM 补充核心端点用例
+  │   │       │                            • 路径参数替换
+  │   │       │
+  │   │       ├── execute_tests.py      ④ 并发测试执行
+  │   │       │                            • 5 并发安全用例
+  │   │       │                            • HITL 危险操作审批
+  │   │       │                            • 状态码 + Schema + 响应时间检查
+  │   │       │
+  │   │       └── validate_report.py    ⑤ LLM 语义验证 + 报告生成
+  │   │                                    • LLM-as-Judge 失败分析
+  │   │                                    • MD/HTML/JSON 报告
+  │   │
+  │   ├── tools/
+  │   │   ├── spec_parser.py            OpenAPI Spec 解析器
+  │   │   │                                • ParsedSpec / EndpointInfo 数据类
+  │   │   │                                • 认证检测 / 摘要生成
+  │   │   │
+  │   │   ├── test_data_gen.py          🔥 测试数据生成器（核心）
+  │   │   │                                • 四维测试用例生成
+  │   │   │                                • 格式感知字符串（date/email/uuid）
+  │   │   │                                • GET 智能识别（body vs query）
+  │   │   │                                • SQL 注入 / XSS Payload 库
+  │   │   │                                • 路径参数边界测试
+  │   │   │
+  │   │   ├── http_client.py            HTTP 请求执行器
+  │   │   │                                • httpx 异步客户端
+  │   │   │                                • 认证注入（Bearer/Basic/API Key）
+  │   │   │                                • 危险方法检测
+  │   │   │
+  │   │   ├── schema_validator.py       JSON Schema 验证器
+  │   │   │                                • 状态码匹配 / Schema 验证
+  │   │   │                                • 响应时间检查
+  │   │   │
+  │   │   ├── web_doc_fetcher.py        Web 文档抓取
+  │   │   │                                • Swagger UI / Redoc 提取
+  │   │   │                                • JSON/YAML 自动识别
+  │   │   │
+  │   │   └── report_gen.py             报告生成器
+  │   │                                    • MD / HTML / JSON 三格式
+  │   │
+  │   ├── llm/
+  │   │   └── deepseek_client.py        DeepSeek OpenAI 兼容客户端
+  │   │                                    • Chat Completion
+  │   │                                    • JSON Mode 结构化输出
+  │   │
+  │   ├── memory/
+  │   │   ├── sqlite_store.py           SQLite 测试记录持久化
+  │   │   │                                • 用例 / 结果 / 运行历史 CRUD
+  │   │   │                                • 分类统计查询
+  │   │   │
+  │   │   ├── sqlite_checkpoint.py      LangGraph SqliteSaver
+  │   │   │                                • Checkpoint 持久化
+  │   │   │                                • time-travel 支持
+  │   │   │
+  │   │   └── qdrant_store.py           Qdrant 向量存储
+  │   │                                    • Spec Embedding 索引
+  │   │                                    • 相似 API 检索
+  │   │
+  │   ├── security/
+  │   │   └── guardrails.py             六层纵深防御
+  │   │                                    • 输入过滤 / 指令隔离 / 工具校验
+  │   │                                    • 沙箱约束 / HITL 审批 / 审计追踪
+  │   │
+  │   ├── observability/
+  │   │   ├── cost_tracker.py           Token 成本追踪
+  │   │   │                                • 多模型 / 多会话 / 多用户
+  │   │   │                                • USD + CNY 双币种
+  │   │   │
+  │   │   └── tracing.py                LangFuse 分布式追踪
+  │   │                                    • @trace_node 装饰器
+  │   │                                    • TraceContext 上下文管理
+  │   │
+  │   ├── evaluation/
+  │   │   ├── llm_judge.py              LLM-as-Judge 评测
+  │   │   │                                • 5 维评分（准确/完整/相关/安全/有用）
+  │   │   │                                • 行为漂移检测
+  │   │   │                                • 基线管理 + 版本对比
+  │   │   │
+  │   │   └── golden_dataset.py         Golden 回归数据集
+  │   │                                    • 已知 Bug 场景管理
+  │   │
+  │   └── prompts/                      Prompt 模板加载
+  │       └── __init__.py                  • YAML 解析 + 变量替换
+  │
+  ├── frontend/
+  │   └── app.py                        Streamlit Dashboard
+  │                                        • Spec URL 输入 + 认证配置
+  │                                        • 测试结果图表（Plotly）
+  │                                        • 用例明细 + 失败分析
+  │                                        • 历史记录浏览
+  │
+  ├── prompts/                          YAML Prompt 模板
+  │   ├── parse_spec.yaml               文档解析 Prompt
+  │   ├── analyze_api.yaml              API 分析 Prompt
+  │   ├── generate_tests.yaml           测试生成 Prompt
+  │   ├── validate_report.yaml          报告验证 Prompt
+  │   └── versions.yaml                 Prompt 版本管理
+  │
+  ├── tests/                            测试套件
+  │   ├── conftest.py                   Pytest fixtures
+  │   ├── test_tools.py                 工具层测试（32 项）
+  │   └── golden_dataset.json           黄金测试数据集
+  │
+  ├── demo/
+  │   └── mock_api.py                   含 5 个故意 Bug 的 Mock API
+  │
+  ├── data/                             SQLite 数据库（运行时生成）
+  ├── reports/                          测试报告输出（运行时生成）
+  │
+  ├── Dockerfile                       多阶段构建（builder → runtime）
+  ├── Dockerfile.frontend               Streamlit 前端镜像
+  ├── docker-compose.yml                3 服务容器编排 + HEALTHCHECK
+  ├── .dockerignore                     Docker 构建忽略规则
+  ├── requirements.txt                  25 个 Python 依赖
+  ├── setup_and_test.py                 一键初始化 & 验证（7 步）
+  ├── run_test.py                       快速 E2E 测试脚本
+  ├── test_comprehensive.py             146 项综合测试
+  ├── .env.example                      环境变量模板
+  ├── 启动教程.md                        详细启动教程（9 章）
+  ├── 项目功能介绍.txt                   本文档
+  └── README.md                         项目文档（架构图 + API 文档）
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  🚀 六、两种部署方式
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  方式一：Docker 全栈部署（推荐，零安装依赖）
+    cp .env.example .env     # 编辑填入 DEEPSEEK_API_KEY
+    docker compose up -d
+    → API: http://localhost:8000/docs
+    → Dashboard: http://localhost:8501
+    → 健康检查: http://localhost:8000/api/health
+
+  方式二：本地开发（热重载）
+    pip install -r requirements.txt
+    docker compose up -d qdrant
+    python setup_and_test.py
+    uvicorn src.main:app --reload --port 8000
+    streamlit run frontend/app.py
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  📡 七、对外服务端口
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  API 文档 (Swagger)    http://localhost:8000/docs
+  健康检查               http://localhost:8000/api/health
+  启动测试               POST http://localhost:8000/api/test/run
+  查询状态               GET  http://localhost:8000/api/test/status/{run_id}
+  查询结果               GET  http://localhost:8000/api/test/results/{run_id}
+  下载报告               GET  http://localhost:8000/api/test/report/{run_id}
+  SSE 实时进度            GET  http://localhost:8000/api/test/stream/{run_id}
+  历史记录               GET  http://localhost:8000/api/test/history
+  Dashboard             http://localhost:8501
+  Qdrant HTTP           http://localhost:16333
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  🧪 八、测试体系
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  类型                │ 数量   │ 说明
+  ────────────────────┼────────┼──────────────────────────
+  单元测试             │ 32     │ SpecParser / TestDataGenerator /
+                      │        │ SchemaValidator / Golden Dataset
+  综合测试             │ 146    │ 16 大类全覆盖（配置/Qdrant/SQLite/
+                      │        │ LLM/安全/HTTP/检查点/追踪/评测/报告/
+                      │        │ Prompt/解析器/数据生成/验证器/看门狗/并发）
+  Golden E2E 测试      │ 3+     │ 已知 Bug 回归数据集
+  Mock API E2E         │ —      │ 5 个故意 Bug 自动发现验证
+
+  运行所有测试：python setup_and_test.py
+  仅单元测试：pytest tests/ -v
+  综合测试：python test_comprehensive.py
+  E2E 测试：python run_test.py
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  📊 九、技术亮点总结
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. LangGraph 状态机编排
+     → 5 节点工作流，每节点有明确输入/输出契约。
+       条件边实现错误快速失败（fail-fast），避免无效计算。
+       SqliteSaver Checkpoint 支持暂停恢复 + time-travel 调试。
+
+  2. 四维测试覆盖 + LLM 增强
+     → 模板生成保证基础覆盖（正常/边界/异常/安全），
+       LLM 对高优先级端点补充上下文感知的额外用例。
+       格式感知数据生成，尊重 date/email/uuid/pattern 约束。
+
+  3. GET 请求智能处理
+     → 自动识别 HTTP 方法语义：GET/DELETE 不发送 body，
+       边界/异常数据通过 query 参数传递。
+       避免 HTTP 规范违规导致的无效测试。
+
+  4. 并发执行 + HITL 双轨制
+     → 安全用例 5 并发（asyncio.Semaphore），
+       危险操作（PUT/DELETE/PATCH）HITL 确认后串行执行。
+       在效率和安全之间取得平衡。
+
+  5. LLM-as-Judge 失败归因
+     → 自动区分：真实 Bug（代码缺陷）vs 测试设计问题
+       vs 环境问题。5 维语义评分 + 行为漂移检测。
+
+  6. Prompt 外置化 + 版本管理
+     → 4 类 Prompt 集中 YAML 文件管理，versions.yaml 版本控制。
+       热重载支持，非工程师可直接编辑中文 Prompt。
+
+  7. 六层安全防御
+     → 从输入过滤到审计追踪的纵深防御，
+       对齐 OWASP Top 10 for LLM Applications。
+
+  8. SSE 流式推送
+     → 基于 asyncio.Queue 的进程内 Pub/Sub 事件总线，
+       15s 心跳保活，前端 EventSource 直接消费。
+
+  9. 生产就绪
+     → Docker 多阶段构建 / 非 root 容器运行 /
+       HEALTHCHECK 健康检查 / 服务依赖编排 /
+       环境变量隔离 / .dockerignore 保护密钥 /
+       32 单元测试 + 146 综合测试 + E2E。
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  📅 生成时间：2026-07-01
+
+╚══════════════════════════════════════════════════════════════════════════╝

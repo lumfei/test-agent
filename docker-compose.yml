@@ -1,0 +1,78 @@
+version: "3.8"
+
+services:
+  # ========== Qdrant 向量数据库（独立实例） ==========
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant-api-test-agent
+    ports:
+      - "16333:6333"   # REST API（映射到宿主机 16333，避免冲突）
+      - "16334:6334"   # GRPC API
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # ========== FastAPI 后端 ==========
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: api-test-agent
+    ports:
+      - "8002:8000"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - QDRANT_COLLECTION=api_test_specs
+      - SQLITE_PATH=/app/data/api_test.db
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+    volumes:
+      - ./data:/app/data
+      - ./reports:/app/reports
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ========== Streamlit 前端 ==========
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: api-test-agent-frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - API_BACKEND_URL=http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  qdrant_data:
+    name: qdrant_api_test_agent_data  # 独立 volume，不与已有 Qdrant 冲突
