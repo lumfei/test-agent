@@ -89,10 +89,9 @@ stateDiagram-v2
         SortByPriority --> SafeBatch: 安全用例 (GET/HEAD)
         SortByPriority --> DangerousCheck: 危险操作 (PUT/DELETE/PATCH)
         SafeBatch --> Concurrent5: 5 并发执行
-        DangerousCheck --> HITL: 人工确认
-        HITL --> SerialExec: 串行执行
+        DangerousCheck --> SkipDangerous: 默认跳过
         Concurrent5 --> CollectResults
-        SerialExec --> CollectResults
+        SkipDangerous --> CollectResults
         CollectResults --> [*]: 执行结果列表
     }
 ```
@@ -103,12 +102,12 @@ stateDiagram-v2
 |------|------|
 | 🔍 **智能文档解析** | 支持 OpenAPI 3.x / Swagger 2.0 JSON/YAML，自动抓取 Swagger UI 页面 |
 | 🧬 **四维测试覆盖** | 正常用例 / 边界测试 / 异常输入 / 安全攻击（SQL 注入、XSS、越权） |
-| ⚡ **并发执行** | 安全用例 5 并发，危险操作串行 + HITL 人工审批 |
-| 🛡️ **六层安全防御** | 输入过滤 → 指令隔离 → 工具校验 → 沙箱约束 → HITL 审批 → 审计追踪 |
+| ⚡ **并发执行** | 安全用例 5 并发，危险操作（PUT/DELETE/PATCH）默认跳过避免误操作 |
+| 🛡️ **多层安全防御** | 输入过滤 → 工具参数校验 → 敏感信息检测 → 响应数据防泄露 |
 | 🧠 **LLM-as-Judge** | 自动区分真实 Bug vs 测试设计问题 vs 环境问题，5 维语义评分 |
 | 📊 **多格式报告** | Markdown / HTML / JSON 报告 + Streamlit 可视化 Dashboard |
 | 💾 **双重持久化** | SQLite 存储测试用例和执行记录，Qdrant 存储 API Spec 向量嵌入 |
-| 🔄 **断点续跑** | LangGraph checkpoint，支持 time-travel 调试 |
+| 🔄 **断点续跑** | LangGraph checkpoint（内存级），支持同进程内状态恢复与调试 |
 | 💰 **成本追踪** | 多模型 Token 用量与费用统计，成本优化建议 |
 | 🌊 **SSE 流式推送** | 实时推送测试执行进度 |
 
@@ -359,7 +358,7 @@ api-test-agent/
 
 | 技术 | 它是什么类型 | 干什么用 | 类比 |
 |------|-------------|----------|------|
-| **六层纵深防御** | 安全防护机制（自研） | 过滤→隔离→校验→沙箱→审批→审计 | 机场六道安检——少过一关都上不了飞机 |
+| **多层安全防御** | 安全防护机制（自研） | 输入过滤→工具校验→敏感数据检测→响应防泄露 | 机场安检——层层把关确保安全 |
 
 ### 🐳 部署相关
 
