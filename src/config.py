@@ -44,6 +44,16 @@ class Config:
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     LOG_FILE: str = os.getenv("LOG_FILE", "./data/api_test.log")
 
+    # === 速率限制（令牌桶） ===
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_RPS: float = float(os.getenv("RATE_LIMIT_RPS", "10"))    # 每秒请求数
+    RATE_LIMIT_BURST: int = int(os.getenv("RATE_LIMIT_BURST", "20"))    # 最大突发
+
+    # === 熔断器 ===
+    CIRCUIT_BREAKER_ENABLED: bool = True
+    CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = int(os.getenv("CIRCUIT_BREAKER_FAILURES", "5"))
+    CIRCUIT_BREAKER_TIMEOUT: float = float(os.getenv("CIRCUIT_BREAKER_TIMEOUT", "30"))
+
     # === 安全 ===
     SANDBOX_ENABLED: bool = True
     ALLOWED_HOSTS: list[str] = None     # None = 允许所有（可配置白名单）

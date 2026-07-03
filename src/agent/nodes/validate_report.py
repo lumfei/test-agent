@@ -140,6 +140,7 @@ async def _llm_validate_failures(
         response = llm.chat_with_tools(
             system_prompt=VALIDATE_SYSTEM_PROMPT,
             user_message=user_msg,
+            tools=[],  # 本节点不需要工具，仅需 LLM 文本分析
             temperature=0.2,
             max_tokens=2048,
         )

@@ -47,6 +47,10 @@ class AgentState(TypedDict, total=False):
     report_path: str                    # 报告文件路径
     report_summary: str                 # 报告摘要
 
+    # === Reflect (ReAct) 阶段产出 ===
+    reflect_iteration: int              # 当前反思轮次
+    regenerated_cases: list[dict[str, Any]]  # LLM 修正后需重新执行的用例
+
     # === 元信息 ===
     started_at: str                     # 开始时间
     error: str                          # 全局错误信息

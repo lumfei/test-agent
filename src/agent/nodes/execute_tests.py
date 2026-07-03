@@ -14,16 +14,26 @@ from src.tools.http_client import HTTPResponse
 
 
 async def execute_tests_node(state: AgentState) -> AgentState:
-    """执行所有测试用例。"""
+    """执行所有测试用例。若存在 regenerated_cases（ReAct 回环），仅执行修正后的用例。"""
     state["current_node"] = "execute"
 
-    test_cases = state.get("test_cases", [])
+    # ReAct 回环：仅执行 LLM 修正后的用例
+    regenerated = state.get("regenerated_cases", [])
+    is_retry = bool(regenerated)
+
+    if is_retry:
+        test_cases = regenerated
+        state["regenerated_cases"] = []  # 清除，避免无限循环
+    else:
+        test_cases = state.get("test_cases", [])
+
     auth_config = state.get("auth_config", {})
     # 从 contextvars 读取（不可序列化的函数，不能放 state 里）
     progress_callback = _progress_cb_ctx.get(None)
 
     if not test_cases:
-        state["error"] = "无测试用例可执行"
+        if not is_retry:
+            state["error"] = "无测试用例可执行"
         return state
 
     # 按优先级排序
@@ -92,8 +102,20 @@ async def execute_tests_node(state: AgentState) -> AgentState:
         except Exception:
             pass
 
-    state["execution_results"] = all_results
-    state["execution_errors"] = all_errors
+    # ReAct 回环：将修正后的结果追加到已有结果（不去重）
+    # 注意：不能用 (method, path) 做去重 key — 一个端点会有多个用例，
+    # 去重 key 太粗会误删所有同端点用例，导致报告只剩 retry 条目。
+    if is_retry:
+        existing = state.get("execution_results", [])
+        existing.extend(all_results)
+        state["execution_results"] = existing
+        # 同样追加错误
+        existing_errs = state.get("execution_errors", [])
+        existing_errs.extend(all_errors)
+        state["execution_errors"] = existing_errs
+    else:
+        state["execution_results"] = all_results
+        state["execution_errors"] = all_errors
 
     return state
 

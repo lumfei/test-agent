@@ -1,6 +1,8 @@
 """
 HTTP 请求执行器 — Agent 的核心工具。
+
 支持所有 REST 方法、多种认证方式、自动重试、超时控制。
+集成令牌桶速率限制 + 熔断器（Circuit Breaker）三态保护。
 """
 from __future__ import annotations
 
@@ -8,11 +10,15 @@ import json
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.config import config
+from src.tools.rate_limiter import default_limiter
+from src.tools.circuit_breaker import breaker_registry
+from src.security.guardrails import audit_logger
 
 
 @dataclass
@@ -54,6 +60,8 @@ class HTTPClient:
         """
         执行单次 HTTP 请求。
 
+        自动经过速率限制器（令牌桶）+ 熔断器（Circuit Breaker）保护。
+
         Args:
             method: HTTP 方法（GET/POST/PUT/PATCH/DELETE）
             url: 完整的请求 URL
@@ -67,6 +75,24 @@ class HTTPClient:
         """
         headers = headers or {}
         headers = self._apply_auth(headers, auth)
+
+        # ── 熔断器检查 ────────────────────────────────────
+        host = self._extract_host(url)
+        breaker = breaker_registry.get(host)
+        if not breaker.can_pass:
+            return HTTPResponse(
+                status_code=0,
+                headers={},
+                body=None,
+                elapsed_ms=0,
+                url=url,
+                method=method.upper(),
+                error=f"熔断器 OPEN（host={host}）：连续失败 {breaker.config.failure_threshold} 次，"
+                      f"冷却中 ({breaker.config.timeout_seconds}s)",
+            )
+
+        # ── 速率限制 ──────────────────────────────────────
+        await default_limiter.acquire()
 
         # 序列化请求体
         content: str | None = None
@@ -103,6 +129,19 @@ class HTTPClient:
 
                 elapsed = (time.perf_counter() - start) * 1000
 
+                # ── 熔断器：记录成功/失败 ──────────────────
+                if 500 <= response.status_code < 600:
+                    breaker.record_failure(f"HTTP {response.status_code}")
+                else:
+                    breaker.record_success()
+
+                # ── 审计日志 ────────────────────────────
+                audit_logger.log_tool_call(
+                    "http_request",
+                    {"method": method, "url": url},
+                    result="success" if response.status_code < 500 else "failed",
+                )
+
                 return HTTPResponse(
                     status_code=response.status_code,
                     headers=dict(response.headers),
@@ -115,12 +154,15 @@ class HTTPClient:
         except httpx.TimeoutException:
             elapsed = (time.perf_counter() - start) * 1000
             error = f"请求超时 ({self.timeout}s)"
+            breaker.record_failure(f"Timeout after {self.timeout}s")
         except httpx.ConnectError as e:
             elapsed = (time.perf_counter() - start) * 1000
             error = f"连接失败: {e}"
+            breaker.record_failure(f"ConnectError: {e}")
         except Exception as e:
             elapsed = (time.perf_counter() - start) * 1000
             error = f"请求异常: {type(e).__name__}: {e}"
+            breaker.record_failure(f"{type(e).__name__}: {e}")
 
         return HTTPResponse(
             status_code=0,
@@ -151,6 +193,47 @@ class HTTPClient:
     def is_dangerous(self, method: str) -> bool:
         """检查是否为需要 HITL 审批的危险操作"""
         return method.upper() in self.DANGEROUS_METHODS
+
+    @property
+    def limiter_stats(self) -> dict:
+        """速率限制器统计"""
+        return default_limiter.stats
+
+    @property
+    def breaker_stats(self) -> dict[str, Any]:
+        """所有熔断器统计"""
+        return {
+            host: {
+                "state": s.state,
+                "failures": s.total_failures,
+                "successes": s.total_successes,
+                "times_opened": s.times_opened,
+            }
+            for host, s in breaker_registry.all_stats.items()
+        }
+
+    @staticmethod
+    def _extract_host(url: str) -> str:
+        """
+        从 URL 中提取 host（用于熔断器分组）。
+
+        URL 解析失败时返回随机 ID，避免所有坏 URL 被归到同一 host
+        导致熔断器误触发（如 LLM 生成的 URL 包含未解析的 {param}）。
+        """
+        try:
+            parsed = urlparse(url)
+            hostname = parsed.hostname
+            if hostname:
+                return hostname
+            # URL 无法解析出 hostname（如相对路径 "/api/test"）
+            # 返回基于路径哈希的唯一 ID，避免所有坏 URL 共享同一个熔断器
+            import hashlib
+            path_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+            return f"__unresolved__{path_hash}"
+        except Exception:
+            import hashlib
+            fallback_hash = hashlib.md5(str(url).encode()).hexdigest()[:8]
+            return f"__unresolved__{fallback_hash}"
 
     def _apply_auth(
         self, headers: dict[str, str], auth: dict[str, Any] | None

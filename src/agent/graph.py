@@ -1,7 +1,10 @@
 """
 LangGraph 状态图 — Agent 的完整执行流程。
 
-节点: Parse → Analyze → Generate → Execute → Validate & Report
+节点: Parse → Analyze → Generate → Execute → Validate → Reflect ↻ Execute
+                                                              ↘ END
+
+内建 ReAct 循环：失败用例经 LLM 反思后自动修正并重试（最多 2 轮）。
 每个节点间有 checkpoint，支持断点续跑和时间旅行调试。
 """
 from __future__ import annotations
@@ -20,6 +23,7 @@ from src.agent.nodes import (
     generate_tests_node,
     execute_tests_node,
     validate_report_node,
+    reflect_node,
 )
 
 
@@ -53,8 +57,27 @@ def should_continue_after_execute(state: AgentState) -> Literal["validate", "err
     return "validate"
 
 
+def should_continue_after_reflect(state: AgentState) -> Literal["execute", "end"]:
+    """
+    Reflect 节点后的路由判断 — ReAct 循环入口。
+
+    如果 LLM 生成了修正后的测试用例且未达到最大迭代次数 → 回到 Execute 重试
+    否则 → 结束
+
+    双重保护（防无限循环）：
+    1. reflect_node 内部在达到 MAX 时清空 regenerated_cases
+    2. 本函数额外检查迭代次数作为纵深防御
+    """
+    from src.agent.nodes.reflect import MAX_REFLECT_ITERATIONS
+    regenerated = state.get("regenerated_cases", [])
+    iteration = state.get("reflect_iteration", 0)
+    if regenerated and iteration < MAX_REFLECT_ITERATIONS:
+        return "execute"
+    return "end"
+
+
 def build_graph() -> StateGraph:
-    """构建 Agent 状态图"""
+    """构建 Agent 状态图（含 ReAct 反思循环）"""
     workflow = StateGraph(AgentState)
 
     # 添加节点
@@ -63,6 +86,7 @@ def build_graph() -> StateGraph:
     workflow.add_node("generate", generate_tests_node)
     workflow.add_node("execute", execute_tests_node)
     workflow.add_node("validate", validate_report_node)
+    workflow.add_node("reflect", reflect_node)
     workflow.add_node("error", error_node)
 
     # 设置入口
@@ -86,8 +110,15 @@ def build_graph() -> StateGraph:
         "error": "error",
     })
 
-    # Validate → END
-    workflow.add_edge("validate", END)
+    # Validate → Reflect（ReAct 反思，可能回到 Execute）
+    workflow.add_edge("validate", "reflect")
+
+    # Reflect → Execute（修正后重试）或 → END
+    workflow.add_conditional_edges("reflect", should_continue_after_reflect, {
+        "execute": "execute",
+        "end": END,
+    })
+
     workflow.add_edge("error", END)
 
     # 编译（带 checkpoint，支持断点续跑）
@@ -114,6 +145,7 @@ _NODE_PROGRESS = [
     ("generate", 0.45, "LLM 正在生成测试用例..."),
     ("execute", 0.65, "正在发送 HTTP 请求..."),
     ("validate", 0.90, "正在验证结果 & 生成报告..."),
+    ("reflect", 0.95, "ReAct 反思: LLM 分析失败用例..."),
 ]
 
 
