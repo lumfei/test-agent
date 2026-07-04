@@ -119,21 +119,30 @@ async def get_report(run_id: str, format: str = "md"):
     run = await db.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    report_path = run.get("report_path", "")
-    if not report_path:
+    stored_path = run.get("report_path", "")
+    if not stored_path:
         raise HTTPException(status_code=404, detail="Report not yet generated")
 
-    if format == "html":
-        report_path = report_path.replace(".md", ".html")
-    elif format == "json":
-        report_path = report_path.replace(".md", ".json")
+    # Resolve filename against the runtime reports directory.
+    # The stored path may be from a different OS (Windows host vs Linux container),
+    # so we extract only the filename and resolve it against the configured dir.
+    # Normalize backslashes (Windows) to forward slashes before extracting the name,
+    # otherwise Linux Path() sees the entire string as one filename.
+    from pathlib import Path
 
-    import os
-    if not os.path.exists(report_path):
+    normalized = stored_path.replace("\\", "/")
+    filename = Path(normalized).name
+    if format == "html":
+        filename = filename.replace(".md", ".html")
+    elif format == "json":
+        filename = filename.replace(".md", ".json")
+
+    report_path = config.REPORTS_DIR / filename
+    if not report_path.exists():
         raise HTTPException(status_code=404, detail="Report file not found")
 
     media = {"md": "text/markdown", "html": "text/html", "json": "application/json"}
-    return FileResponse(report_path, media_type=media.get(format, "text/plain"),
+    return FileResponse(str(report_path), media_type=media.get(format, "text/plain"),
                         filename=f"report_{run_id}.{format}")
 
 

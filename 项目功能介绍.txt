@@ -119,7 +119,7 @@
       └─ 惰性连接（LangFuse 不可用时不影响核心功能）
 
   12. 🧪 完整测试体系
-      ├─ 32 项单元测试（SpecParser / TestDataGenerator / SchemaValidator / Golden Dataset）
+      ├─ 32 项后端单元测试 + 99 项前端单元测试（工具函数 24 + Store 31 + 组件渲染 44）
       ├─ 146 项综合测试（16 大类：配置 / Qdrant / SQLite / LLM / 安全 / HTTP /
       │                    检查点 / 追踪 / 评测 / 报告 / Prompt / 解析器 /
       │                    数据生成 / 验证器 / 看门狗 / 并发）
@@ -167,9 +167,10 @@
     • 每次 invoke 指定 thread_id，支持多会话并发隔离
     • contextvars 传递不可序列化回调（progress_callback），绕过 checkpoint 限制
 
-  三服务架构（Docker 全栈部署）：
+  四服务架构（Docker 全栈部署）：
     • FastAPI：REST API + SSE 流式（生产级后端，端口 8002→8000）
-    • Streamlit：交互式 Dashboard（图表 + 结果浏览，端口 8501）
+    • React + TypeScript：现代前端 Dashboard（Vite 开发 5173 / 生产构建）
+    • Streamlit：Python 原生 Dashboard（兼容保留，端口 8501）
     • Qdrant：向量数据库（Docker 独立容器，端口 16333→6333）
 
 
@@ -245,6 +246,14 @@
   │                      │                                       │
   │ 🖥️ 前端 / Dashboard     │                                       │
   │                      │                                       │
+  │ React 18 + TypeScript │ 前端 UI 框架 + 类型安全系统。         │
+  │ + Vite + Tailwind CSS │ → 组件化设计，25 个组件（4 层架构）   │
+  │ + Zustand + Recharts  │ → Zustand 状态管理（4 个 Store）      │
+  │                       │ → SSE 实时流消费 + 离线 JSON 加载     │
+  │                       │ → 99 前端测试（Vitest + Testing Lib） │
+  │                       │ → 生产构建 ~700KB gzip ~205KB         │
+  │                       │   (详见 frontend-react/)              │
+  │                       │                                       │
   │ Streamlit 1.30+      │ Python 数据展示框架。不用写 HTML/CSS，   │
   │                      │ Python 代码直接画出网页界面。            │
   │                      │ → 测试结果图表 + 用例明细表              │
@@ -645,6 +654,6 @@
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  📅 更新日期：2026-07-03
+  📅 更新日期：2026-07-04
 
 ╚══════════════════════════════════════════════════════════════════════════╝
